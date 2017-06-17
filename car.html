@@ -1,0 +1,328 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+
+    <meta charset="UTF-8">
+    <meta content="IE=edge" http-equiv="X-UA-Compatible">
+    <meta content="width=device-width, initial-scale=1" name="viewport">
+  
+    <script src="http://api.map.baidu.com/api?v=2.0&ak=fNvowSBXwhZgg7YkLsP1PHFy"></script>
+    <script type="text/javascript" src="http://api.map.baidu.com/library/LuShu/1.2/src/LuShu_min.js"></script>
+
+    <title>车辆历史轨迹回放</title>
+</head>
+
+<div class="content">
+  
+    <div class="con-tab">
+       
+
+        <div class="tabTag tag-on">
+           
+            <div class="cur-con">
+                <div class="cc-treeList">
+                    <form id="search-form" style="margin: 10px;" action="carTrajectory.html" method="get">
+                        <div class="form-group">
+                            <label class="control-label">车牌号：</label>
+                            <input  maxlength="20"
+                                    class="form-control" type="text" style="position: static;"
+                                    value="${viewCarRealvo.lpn }" name="lpn" id="lpn">
+                        </div>
+                        <div class="form-group">
+                            <label class="control-label">开始时间：</label>
+                            <input class="form-control wz-date hasDatepicker"
+                                   style="position: static;" id="startCreateTime" name="startCreateTime" value=""
+                                   type="text" class="Wdate" onfocus="WdatePicker({skin:'whyGreen',readOnly:true,dateFmt:'yyyy-MM-dd HH:mm:ss',isShowWeek:true})"
+                                   value="<fmt:formatDate value='${viewCarRealvo.startCreateTime }' type='date' dateStyle='default'/>"
+                                   >
+                        </div>
+                        <div class="form-group">
+                            <label class="control-label">截止时间：</label>
+                            <input class="form-control wz-date hasDatepicker"
+                                   style="position: static;" id="overCreateTime" name="overCreateTime" value=""
+                                   type="text" class="Wdate" onfocus="WdatePicker({skin:'whyGreen',readOnly:true,dateFmt:'yyyy-MM-dd HH:mm:ss',isShowWeek:true})"
+                                   value="<fmt:formatDate value='${viewCarRealvo.overCreateTime }' type='date' dateStyle='default'/>"
+                                   >
+                        </div>
+                        <div class="form-group">
+                            <button id="btn-search" class="btn btn-sm btn-primary" type="button">查询</button>
+                        </div>
+                        <hr>
+                        <div class="form-group">
+                            <label class="control-label">播放速度：</label>
+                            <div class="form-group">
+                                <select id="play-speed" class="form-control">
+                                    <option value="10000">0.1km/s</option>
+                                    <option value="4000">0.2km/s</option>
+                                    <option value="2000">0.5km/s</option>
+                                    <option value="1000">1km/s</option>
+                                    <option value="300">3km/s</option>
+                                    <option value="100">5km/s</option>
+                                    <option value="10">10km/s</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input id="follow" type="checkbox">
+                                画面跟随
+                            </label>
+                        </div>
+                        <div>
+                            <button id="btn-play" type="button" class="btn btn-primary" disabled> 播放
+                            </button>
+                            <button id="btn-pause" type="button" class="btn btn-primary" disabled>暂停
+                            </button>
+                            <button id="btn-stop" type="button" class="btn btn-primary" disabled>停止
+                            </button>
+                        </div>
+                    </form>
+                </div>
+                <div class="fullscreen" style="top:25.3%;left:90%;">
+			        <button id="view-fullscreen" type="button" class="img fc-btn"></button>
+			    </div>
+                <div class="cc-mapArea">
+                    <div id="map_canvas" class="ccMap"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+<script src="jquery-1.11.0.min.js"></script>
+
+<script>
+    /**
+     * 初始化地图
+     */
+    var initMap = function () {
+        var map = new BMap.Map('map_canvas');
+        var geolocation = new BMap.Geolocation();
+        geolocation.getCurrentPosition(function (r) {
+            if (this.getStatus() == BMAP_STATUS_SUCCESS) {
+                var newpoint = new BMap.Point(r.point.lng, r.point.lat);
+                map.centerAndZoom(newpoint, 13);
+                map.enableScrollWheelZoom();
+            	map.addControl(new BMap.NavigationControl());
+            	map.addControl(new BMap.ScaleControl());
+            	map.addControl(new BMap.OverviewMapControl({
+            		isOpen : true
+            	}));
+            }
+            else {
+                alert('failed' + this.getStatus());
+            }
+        }, {enableHighAccuracy: true})
+        var driving;
+        var carMk;
+        //获取所有点的坐标
+        var points = [];
+        var direction = [];
+        var centerPoint;
+
+        var timer; //定时器
+        var run=false;
+        var index = 0; //记录播放到第几个point
+
+        var followChk;
+
+        var carIcon = new BMap.Icon("http://developer.baidu.com/map/jsdemo/img/car.png", new BMap.Size(52, 26), { //小车图片
+            //offset: new BMap.Size(0, -5),    //相当于CSS精灵
+            imageOffset: new BMap.Size(0, 0) //图片的偏移量。为了是图片底部中心对准坐标点。
+        });
+        searchHistoryTrack();
+
+        /**
+         * 初始化地图上的点
+         */
+        function initMapPoint(results) {
+            followChk = document.getElementById("follow");
+
+            //初始化地图,选取第一个点为起始点
+            map.enableScrollWheelZoom();
+            map.addControl(new BMap.NavigationControl());
+            map.addControl(new BMap.ScaleControl());
+            map.addControl(new BMap.OverviewMapControl({
+                isOpen: true
+            }));
+
+            map.clearOverlays();
+            points = [];
+            direction = [];
+            if (!results || results.length == 0) {
+            	$("#btn-play").attr('disabled', true);
+                return;
+            }
+            for (var i = 0; i < results.length; i++) {
+                points.push(new BMap.Point( results[i].longitude,results[i].latitude));
+                direction.push(results[i].direction);
+            }
+
+            var startPoint = points[0];
+            var endPoint = points[points.length - 1];
+
+
+            carMk = new BMap.Marker(startPoint, {icon: carIcon});
+            map.addOverlay(direction[0]);
+            map.addOverlay(carMk);
+
+            //通过DrivingRoute获取一条路线的point
+            driving = new BMap.DrivingRoute(map);
+
+            driving.search(startPoint, endPoint);
+
+            driving.setSearchCompleteCallback(function () {
+                //得到路线上的所有point
+//			pointss = driving.getResults().getPlan(0).getRoute(0).getPath();
+                //画面移动到起点和终点的中间
+                centerPoint = new BMap.Point(
+                        (startPoint.lng + startPoint.lng) / 2,
+                        (startPoint.lat + startPoint.lat) / 2);
+                map.panTo(centerPoint);
+                //连接所有点
+                map.addOverlay(new BMap.Polyline(points, {
+                    strokeColor: "#4876FF",
+                    strokeWeight: 3,
+                    strokeOpacity: 1
+                }));
+
+                //点亮操作按钮
+                $("#btn-play").attr('disabled', false);
+                $("#btn-pause").attr('disabled', true);
+                $("#btn-stop").attr('disabled', true);
+            });
+        }
+        /**
+         * 播放按钮点击
+         */
+        $("#btn-play").click(function () {
+            $("#btn-play").attr("disabled", true);
+            $("#btn-pause").attr("disabled", false);
+            $("#btn-stop").attr('disabled', false);
+
+            var pts = points;
+			var direc = direction;
+            var paths = pts.length;    //获得有几个点
+            run=true;
+            i = index;
+            resetMkPoint(i);
+            //alert();
+            if(i<paths){
+            	resetMkPoint(i);
+            }
+            else{
+            	resetMkPoint(0);
+            }
+            
+        });
+        function resetMkPoint(i) {
+        	var pts = points;
+ 			var direc = direction;
+            var paths = pts.length;    //获得有几个点
+        	index=i;
+            carMk.setPosition(pts[i]);
+            carMk.setRotation(direc[i]);
+            if (followChk.checked) {
+            	map.panTo(direc[i]);
+                map.panTo(pts[i]);
+            }
+            if (i < paths) {
+             timer=function () {
+            	if(!run)return;
+            	if(run){
+            		i++;
+                    resetMkPoint(i);
+            	}
+            	if(i>=paths){
+            		 resetMkPoint(0);
+            		 run=false;
+            		 clearInterval(timer);
+            	}
+                
+                
+             }
+             setTimeout(timer,$("#play-speed").val());
+            } else {
+                $("#btn-play").attr('disabled', false);
+                $("#btn-pause").attr("disabled", true);
+                $("#btn-stop").attr("disabled", true);
+            }
+        }
+        /**
+         * 暂停按钮点击
+         */
+        $("#btn-pause").click(function () {
+            $("#btn-play").attr('disabled', false);
+            $("#btn-pause").attr("disabled", true);
+            $("#btn-stop").attr("disabled", false);
+
+            if (timer) {
+            	run=false;
+                clearInterval(timer);
+            }
+        });
+        /**
+         * 停止按钮点击
+         */
+        $("#btn-stop").click(function () {
+            $("#btn-play").attr('disabled', false);
+            $("#btn-pause").attr("disabled", true);
+            $("#btn-stop").attr("disabled", true);
+
+            if (timer) {
+            	run=false;
+            	index=0;
+                clearInterval(timer);
+            }
+            resetMkPoint(0);
+        });
+        window.initMapPoint = initMapPoint;
+        $("#btn-search").click(function () {
+        	searchHistoryTrack();
+        	index=0;
+        });
+    };
+
+    // 计算地图层的高度
+    var resize = function () {
+        var h = $(window).height();
+        $("#map_canvas").height(h - 120);
+    };
+    $(document).ready(function () {
+        // 计算地图层高度.
+        resize();
+        initMap();
+
+        var viewFullScreen = document.getElementById("view-fullscreen");
+        if (viewFullScreen) {
+            viewFullScreen.addEventListener("click", function () {
+                parent.viewFullScreen();
+            }, false);
+        }
+       
+    });
+    function searchHistoryTrack(){
+    	var startTime=$("#startCreateTime").val();
+    	var endTime=$("#overCreateTime").val();
+    	var lpn=$("#lpn").val();
+    	var pp={"lpn":lpn,"startTime":startTime,"endTime":endTime};
+        var params = JSON.stringify(pp);
+        $.ajax({
+            url: "searchHistoryTrack.shtml",
+            type: "POST",
+            contentType: "application/json",
+            data: params,
+            success: function (result) {
+                initMapPoint(result);
+            },
+            error: function () {
+
+            }
+        });
+    }
+    window.onresize = resize;
+</script>
+</body>
+</html>
